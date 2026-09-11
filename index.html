@@ -30,10 +30,65 @@
 <div id="modal" class="modal" onclick="if(event.target.id==='modal')closeModal()"><div id="sheet" class="sheet"></div></div>
 <script>
 const KEY='lifeos_v1';
-let db=JSON.parse(localStorage.getItem(KEY)||'null')||{tasks:[],events:[],reminders:[],transactions:[],loans:[],goals:[],people:[],docs:[],assets:[],receipts:[],connections:[],notes:[],settings:{name:'',currency:'INR',theme:'light'}};
-const save=()=>localStorage.setItem(KEY,JSON.stringify(db));
+
+const DEFAULT_DB={
+  tasks:[], events:[], reminders:[], transactions:[], loans:[], goals:[],
+  people:[], docs:[], assets:[], receipts:[], connections:[], notes:[],
+  settings:{name:'',currency:'INR',theme:'light'}
+};
+
+function loadDB(){
+  try{
+    const raw=localStorage.getItem(KEY);
+    if(!raw) return structuredClone(DEFAULT_DB);
+    const saved=JSON.parse(raw);
+    if(!saved || typeof saved!=='object') return structuredClone(DEFAULT_DB);
+
+    const merged={
+      ...DEFAULT_DB,
+      ...saved,
+      settings:{...DEFAULT_DB.settings,...(saved.settings||{})}
+    };
+
+    for(const k of Object.keys(DEFAULT_DB)){
+      if(k!=='settings' && !Array.isArray(merged[k])) merged[k]=[];
+    }
+
+    return merged;
+  }catch(error){
+    console.warn('LifeOS data recovery:',error);
+    return structuredClone(DEFAULT_DB);
+  }
+}
+
+let db=loadDB();
+
+window.addEventListener('error',e=>{
+  console.error('LifeOS error:',e.error||e.message);
+});
+
+window.addEventListener('unhandledrejection',e=>{
+  console.error('LifeOS promise error:',e.reason);
+});
+const save=()=>{
+  try{
+    localStorage.setItem(KEY,JSON.stringify(db));
+    return true;
+  }catch(error){
+    console.error('LifeOS save error:',error);
+    alert('LifeOS could not save this change in browser storage.');
+    return false;
+  }
+};
 const id=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
-const money=n=>new Intl.NumberFormat(undefined,{style:'currency',currency:db.settings.currency||'INR',maximumFractionDigits:2}).format(Number(n)||0);
+const money=n=>{
+  const currency=db.settings?.currency||'INR';
+  try{
+    return new Intl.NumberFormat(undefined,{style:'currency',currency,maximumFractionDigits:2}).format(Number(n)||0);
+  }catch(error){
+    return Number(n||0).toFixed(2)+' '+currency;
+  }
+};
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const today=()=>new Date().toISOString().slice(0,10);
 const fmt=d=>d?new Date(d+'T00:00:00').toLocaleDateString():''; 
@@ -66,7 +121,7 @@ function renderHome(v){let t=moneyTotals(),pending=db.tasks.filter(x=>!x.done).l
 function todayRows(){let a=[...db.tasks.filter(x=>!x.done&&(!x.date||x.date===today())).map(x=>`<div class="row"><div class="rowmain"><div class="title">📋 ${esc(x.title)}</div><div class="meta">Task ${x.date?'• '+fmt(x.date):''}</div></div><button class="pillbtn" onclick="toggleTask('${x.id}')">Done</button></div>`),b=db.reminders.filter(x=>x.date===today()).map(x=>`<div class="row"><div><div class="title">🔔 ${esc(x.title)}</div><div class="meta">Reminder</div></div></div>`),c=db.events.filter(x=>x.date===today()).map(x=>`<div class="row"><div><div class="title">📅 ${esc(x.title)}</div><div class="meta">${esc(x.time||'')}</div></div></div>`);return (a.concat(b,c).slice(0,6).join(''))||`<div class="empty">Nothing urgent today. Nice. 🎉</div>`}
 function renderLife(v){v.innerHTML=`<div class="sectionhead"><h1>📋 Life</h1><button class="btn" onclick="openAddType('task')">＋ Task</button></div><div class="tabs"><button class="on">Tasks</button><button onclick="openPage('calendar')">Calendar</button><button onclick="openPage('reminders')">Reminders</button><button onclick="openPage('lists')">Lists</button></div><div class="list">${db.tasks.length?db.tasks.slice().sort((a,b)=>(a.done-b.done)||String(a.date).localeCompare(String(b.date))).map(x=>`<div class="row"><input class="check" type="checkbox" ${x.done?'checked':''} onchange="toggleTask('${x.id}')"><div class="rowmain"><div class="title" style="${x.done?'text-decoration:line-through;color:#98a2b3':''}">${esc(x.title)}</div><div class="meta">${x.date?fmt(x.date):'No due date'}</div></div><button class="pillbtn" onclick="remove('tasks','${x.id}')">🗑</button></div>`).join(''):`<div class="empty">No tasks yet. Add your first task.</div>`}</div>`}
 function renderMoney(v){let t=moneyTotals();v.innerHTML=`<div class="sectionhead"><h1>💰 Money</h1><button class="btn" onclick="openAddType('money')">＋ Money</button></div><div class="grid"><div class="card"><div class="label">Net tracked</div><div class="metric">${money(t.balance)}</div></div><div class="card"><div class="label">Income</div><div class="metric good">${money(t.income)}</div></div><div class="card"><div class="label">Expenses</div><div class="metric bad">${money(t.expense)}</div></div><div class="card"><div class="label">Assets</div><div class="metric">${money(t.assets)}</div></div></div><section class="section grid2"><div class="card"><div class="sectionhead"><h2>🤝 Money to receive</h2><button class="pillbtn" onclick="openAddType('loan')">＋</button></div>${db.loans.length?db.loans.map(x=>`<div class="row"><div><div class="title">${esc(x.person)}</div><div class="meta">${money(x.amount)} • expected ${money(x.expected||x.amount)} • ${x.returnDate?fmt(x.returnDate):'no date'}</div></div><div class="actions">${x.returned?'<span class="tag good">Returned</span>':`<button class="pillbtn" onclick="markLoan('${x.id}')">Returned</button>`}</div></div>`).join(''):'<div class="empty">No lending records.</div>'}</div><div class="card"><div class="sectionhead"><h2>🎯 Goals</h2><button class="pillbtn" onclick="openAddType('goal')">＋</button></div>${db.goals.length?db.goals.map(x=>{let p=Math.min(100,(Number(x.current)/Number(x.target||1))*100);return `<div class="row"><div style="width:100%"><div class="title">${esc(x.title)}</div><div class="meta">${money(x.current)} / ${money(x.target)}</div><div class="progress"><i style="width:${p}%"></i></div></div></div>`}).join(''):'<div class="empty">No savings goals.</div>'}</div></section><section class="section card"><div class="sectionhead"><h2>Transactions</h2></div>${db.transactions.length?db.transactions.slice().reverse().map(x=>`<div class="row"><div><div class="title">${x.type==='income'?'⬆️':'⬇️'} ${esc(x.title)}</div><div class="meta">${fmt(x.date)} • ${esc(x.category||'')}</div></div><b class="${x.type==='income'?'good':'bad'}">${x.type==='income'?'+':'-'}${money(x.amount)}</b></div>`).join(''):'<div class="empty">No transactions yet.</div>'}</section>`}
-function markLoan(x){let a=db.loans.find(a=>a.id===x);if(a)a.returned=true;save();render()}
+ function markLoan(x){let a=db.loans.find(a=>a.id===x);if(a)a.returned=true;save();render()}
 function renderPeople(v){v.innerHTML=`<div class="sectionhead"><h1>👥 People</h1><button class="btn" onclick="openAddType('person')">＋ Person</button></div><div class="card"><h2>ConnectCircle</h2><p class="small">Post an activity request without exposing your exact location.</p><button class="btn" onclick="openAddType('connection')">＋ Find people</button></div><section class="section"><div class="list">${db.people.length?db.people.map(x=>`<div class="row"><div><div class="title">👤 ${esc(x.name)}</div><div class="meta">${esc(x.phone||'')}${x.email?' • '+esc(x.email):''}</div></div><button class="pillbtn" onclick="remove('people','${x.id}')">🗑</button></div>`).join(''):'<div class="empty">No people added.</div>'}</div></section><section class="section card"><h2>Requests</h2>${db.connections.length?db.connections.map(x=>`<div class="row"><div><div class="title">🤝 ${esc(x.intent)}</div><div class="meta">${esc(x.area||'Area not specified')} • ${x.date?fmt(x.date):'Any date'}</div></div><button class="pillbtn" onclick="remove('connections','${x.id}')">Remove</button></div>`).join(''):'<div class="empty">No connection requests.</div>'}</section>`}
 function renderMore(v){v.innerHTML=`<h1>⋯ More</h1><div class="grid2">${[['📄','Documents','documents'],['📦','Assets & Warranty','assets'],['🧾','Receipts','receipts'],['🛡️','Safety Check','safety'],['📊','Insights','insights'],['🤖','LifeOS AI','ai'],['📝','Notes','notes'],['⚙️','Settings','settings']].map(x=>`<button class="card" onclick="openPage('${x[2]}')"><div style="font-size:28px">${x[0]}</div><div class="title">${x[1]}</div><div class="meta">Open module</div></button>`).join('')}</div>`}
 function renderSub(p){let v=document.getElementById('view');if(p==='documents')v.innerHTML=`<div class="sectionhead"><h1>📄 Documents</h1><button class="btn" onclick="openAddType('doc')">＋ Document</button></div><div class="list">${db.docs.length?db.docs.map(x=>`<div class="row"><div><div class="title">${esc(x.title)}</div><div class="meta">${esc(x.category||'')} ${x.expiry?'• Expires '+fmt(x.expiry):''}</div></div><button class="pillbtn" onclick="remove('docs','${x.id}')">🗑</button></div>`).join(''):'<div class="empty">No documents. Store expiry reminders here; upload files in a future cloud/encrypted version.</div>'}</div>`;
@@ -74,7 +129,7 @@ else if(p==='assets')v.innerHTML=`<div class="sectionhead"><h1>📦 Assets</h1><
 else if(p==='receipts')v.innerHTML=`<div class="sectionhead"><h1>🧾 Receipts</h1><button class="btn" onclick="openAddType('receipt')">＋ Receipt</button></div><div class="list">${db.receipts.length?db.receipts.map(x=>`<div class="row"><div><div class="title">${esc(x.merchant||'Receipt')}</div><div class="meta">${x.date?fmt(x.date):''} • ${money(x.amount)}</div></div><button class="pillbtn" onclick="remove('receipts','${x.id}')">🗑</button></div>`).join(''):'<div class="empty">No receipts.</div>'}</div>`;
 else if(p==='safety')v.innerHTML=`<h1>🛡️ Safety Check</h1><div class="card"><p>Paste a suspicious message, email, URL or QR text. This offline checker looks for common warning patterns; it is not a guarantee.</p><textarea id="safetyText" style="width:100%;min-height:150px;padding:12px;border:1px solid #d0d5dd;border-radius:12px" placeholder="Paste the message or link here..."></textarea><button class="btn" style="margin-top:10px" onclick="checkSafety()">Analyze</button><div id="safetyResult"></div></div>`;
 else if(p==='insights'){let t=moneyTotals(),food=db.transactions.filter(x=>/food|restaurant|coffee|grocery|meal/i.test(x.category+' '+x.title)).reduce((s,x)=>s+Number(x.amount),0);v.innerHTML=`<h1>📊 Insights</h1><div class="grid2"><div class="card"><div class="label">Savings rate</div><div class="metric">${t.income?Math.round((t.income-t.expense)/t.income*100):0}%</div><p class="small">Based on tracked income and expenses.</p></div><div class="card"><div class="label">Food-related spending</div><div class="metric">${money(food)}</div><p class="small">Category/title keyword estimate.</p></div></div><div class="section card"><h2>Smart suggestions</h2><ul><li>Review recurring expenses monthly.</li><li>Set an emergency-fund goal.</li><li>Add expiry dates for important documents.</li><li>Use Safety Check before acting on unexpected payment requests.</li></ul></div>`}
-else if(p==='ai')v.innerHTML=`<h1>🤖 Ask LifeOS</h1><div class="card"><p class="small">This starter version answers using your local LifeOS data. A future version can connect a privacy-controlled AI API.</p><input id="aiq" style="width:100%;padding:12px;border:1px solid #d0d5dd;border-radius:12px" placeholder="e.g. What do I need to do today?"><button class="btn" style="margin-top:10px" onclick="askAI()">Ask</button><div id="aiout"></div></div>`;
+                      else if(p==='ai')v.innerHTML=`<h1>🤖 Ask LifeOS</h1><div class="card"><p class="small">This starter version answers using your local LifeOS data. A future version can connect a privacy-controlled AI API.</p><input id="aiq" style="width:100%;padding:12px;border:1px solid #d0d5dd;border-radius:12px" placeholder="e.g. What do I need to do today?"><button class="btn" style="margin-top:10px" onclick="askAI()">Ask</button><div id="aiout"></div></div>`;
 else if(p==='notes')v.innerHTML=`<div class="sectionhead"><h1>📝 Notes</h1><button class="btn" onclick="openAddType('note')">＋ Note</button></div><div class="list">${db.notes.length?db.notes.map(x=>`<div class="card"><div class="sectionhead"><h3>${esc(x.title)}</h3><button class="pillbtn" onclick="remove('notes','${x.id}')">🗑</button></div><p>${esc(x.body)}</p></div>`).join(''):'<div class="empty">No notes.</div>'}`;
 else if(p==='settings')v.innerHTML=`<h1>⚙️ Settings</h1><div class="card"><div class="form"><label>Your name<input id="setname" value="${esc(db.settings.name)}"></label><label>Currency<select id="setcur">${['INR','USD','EUR','GBP','JPY','AUD','CAD','SGD','AED'].map(c=>`<option ${db.settings.currency===c?'selected':''}>${c}</option>`).join('')}</select></label><button class="btn" onclick="saveSettings()">Save settings</button><button class="btn secondary" onclick="exportData()">Export my data</button><button class="btn danger" onclick="resetData()">Delete all local data</button></div></div><p class="small">LifeOS starter stores data in this browser's localStorage. Do not store highly sensitive documents until encrypted storage and secure authentication are added.</p>`;
 else if(p==='calendar')v.innerHTML=`<h1>📅 Calendar</h1><div class="list">${db.events.length?db.events.slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(x=>`<div class="row"><div><div class="title">${esc(x.title)}</div><div class="meta">${x.date?fmt(x.date):''} ${esc(x.time||'')} ${esc(x.place||'')}</div></div><button class="pillbtn" onclick="remove('events','${x.id}')">🗑</button></div>`).join(''):'<div class="empty">No events.</div>'}`;
@@ -86,7 +141,27 @@ function askAI(){let q=document.getElementById('aiq').value.toLowerCase(),t=mone
 function saveSettings(){db.settings.name=document.getElementById('setname').value.trim();db.settings.currency=document.getElementById('setcur').value;save();openPage('home')}
 function exportData(){let b=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='lifeos-backup.json';a.click();URL.revokeObjectURL(a.href)}
 function resetData(){if(confirm('Delete ALL LifeOS data from this browser?')){localStorage.removeItem(KEY);location.reload()}}
-if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
-window.page='home';render();
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(error=>{
+    console.warn('Service worker:',error);
+  });
+}
+ function bootLifeOS(){
+  try{
+    window.page='home';
+    render();
+  }catch(error){
+    console.error('LifeOS boot error:',error);
+    document.getElementById('view').innerHTML=`
+      <div class="dangerbox">
+        <h2>LifeOS needs a quick reset</h2>
+        <p>The app loaded, but an old browser record is incompatible with this version.</p>
+        <button class="btn danger" onclick="resetData()">Reset local LifeOS data</button>
+        <button class="btn secondary" style="margin-top:8px" onclick="location.reload()">Reload</button>
+      </div>`;
+  }
+}
+
+bootLifeOS();
 </script>
 </body></html>
