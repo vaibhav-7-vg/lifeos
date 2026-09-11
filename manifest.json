@@ -1,0 +1,12 @@
+{
+  "name":"LifeOS — Personal Life Operating System",
+  "short_name":"LifeOS",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#f5f7fb",
+  "theme_color":"#111827",
+  "description":"Organize life, money, people, documents and safety in one privacy-first PWA.",
+  "icons":[
+    {"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}
